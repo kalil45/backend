@@ -1,18 +1,18 @@
- 1 {
-    2   "name": "backend",
-    3   "version": "1.0.0",
-    4   "description": "",
-    5   "main": "api/index.js",
-    6   "scripts": {
-    7     "start": "node api/index.js",
-    8     "test": "echo \"Error: no test specified\" && exit 1"
-    9   },
-   10   "keywords": [],
-   11   "author": "",
-   12   "license": "ISC",
-   13   "dependencies": {
-   14     "cors": "^2.8.5",
-   15     "express": "^5.1.0",
-   16     "pg": "^8.11.3"
-   17   }
-   18 }
+  {
+       "name": "backend",
+       "version": "1.0.0",
+      "description": "",
+      "main": "api/index.js",
+       "scripts": {
+         "start": "node api/index.js",
+         "test": "echo \"Error: no test specified\" && exit 1"
+       },
+      "keywords": [],
+     "author": "",
+     "license": "ISC",
+     "dependencies": {
+       "cors": "^2.8.5",
+       "express": "^5.1.0",
+      "pg": "^8.11.3"
+     }
+    }

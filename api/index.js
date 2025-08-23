@@ -15,17 +15,12 @@ const pool = new Pool({
   }
 });
 
-// Helper function to get local date in YYYY-MM-DD format
-const getLocalDate = () => {
-  const date = new Date();
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
+// --- PERBAIKAN UNTUK DATABASE INITIALIZATION ---
+let dbInitialized = false;
 
-// Fungsi untuk inisialisasi tabel database
 const initializeDatabase = async () => {
+  if (dbInitialized) return;
+
   const client = await pool.connect();
   try {
     await client.query(`
@@ -62,15 +57,35 @@ const initializeDatabase = async () => {
         type TEXT NOT NULL
       )`);
     console.log('Database tables checked/created successfully.');
+    dbInitialized = true; // Tandai bahwa inisialisasi sudah selesai
   } catch (err) {
     console.error('Error initializing database:', err.message);
+    throw err; // Lemparkan error agar proses berhenti jika gagal
   } finally {
     client.release();
   }
 };
 
-// Panggil inisialisasi database saat server dimulai
-initializeDatabase();
+// Middleware untuk memastikan database siap sebelum setiap request
+app.use(async (req, res, next) => {
+  try {
+    await initializeDatabase();
+    next();
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to initialize database.' });
+  }
+});
+// --- AKHIR PERBAIKAN ---
+
+
+// Helper function to get local date in YYYY-MM-DD format
+const getLocalDate = () => {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 // TRANSACTIONS API
 app.post('/api/transactions', async (req, res) => {

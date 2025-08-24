@@ -176,7 +176,7 @@ app.delete('/api/transactions/:id', async (req, res) => {
 
 app.put('/api/transactions/:id', async (req, res) => {
     const { id } = req.params;
-    const { quantity, costPrice, sellingPrice } = req.body;
+    const { quantity, costprice, sellingPrice } = req.body;
     const client = await pool.connect();
 
     try {
@@ -224,7 +224,7 @@ app.put('/api/transactions/:id', async (req, res) => {
 
 // PRODUCTS API
 app.post('/api/products', async (req, res) => {
-    const { name, stock, price, costPrice } = req.body;
+    const { name, stock, price, costprice } = req.body;
     try {
         const result = await pool.query(
             'INSERT INTO products (name, stock, price, costprice) VALUES ($1, $2, $3, $4) RETURNING id',

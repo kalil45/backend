@@ -207,8 +207,8 @@ app.put('/api/transactions/:id', async (req, res) => {
         const newTotal = quantity * sellingPrice;
         const newProfitPerUnit = sellingPrice - costPrice;
         await client.query(
-            'UPDATE transactions SET quantity = $1, costPrice = $2, sellingPrice = $3, total = $4, profitPerUnit = $5 WHERE id = $6',
-            [quantity, costPrice, sellingPrice, newTotal, newProfitPerUnit, id]
+            'UPDATE transactions SET quantity = $1, costprice = $2, sellingPrice = $3, total = $4, profitPerUnit = $5 WHERE id = $6',
+            [quantity, costprice, sellingPrice, newTotal, newProfitPerUnit, id]
         );
 
         await client.query('COMMIT');
@@ -227,8 +227,8 @@ app.post('/api/products', async (req, res) => {
     const { name, stock, price, costPrice } = req.body;
     try {
         const result = await pool.query(
-            'INSERT INTO products (name, stock, price, costPrice) VALUES ($1, $2, $3, $4) RETURNING id',
-            [name, stock, price, costPrice]
+            'INSERT INTO products (name, stock, price, costprice) VALUES ($1, $2, $3, $4) RETURNING id',
+            [name, stock, price, costprice]
         );
         res.status(201).json({ id: result.rows[0].id });
     } catch (err) {

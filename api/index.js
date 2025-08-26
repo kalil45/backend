@@ -9,10 +9,7 @@ app.use(express.json());
 
 // Konfigurasi Pool Koneksi PostgreSQL
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false
-  }
+  connectionString: 'postgresql://neondb_owner:npg_VjRmJoXuk4T8@ep-morning-frost-a1skhmpr-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require',
 });
 
 // --- PERBAIKAN UNTUK DATABASE INITIALIZATION ---

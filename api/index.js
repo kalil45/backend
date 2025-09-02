@@ -86,35 +86,39 @@ const getLocalDate = () => {
 
 // TRANSACTIONS API
 app.post('/api/transactions', async (req, res) => {
-  const { productName, quantity, costPrice, sellingPrice } = req.body;
+  const { items } = req.body;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    const productRes = await client.query('SELECT * FROM products WHERE name = $1', [productName]);
-    const product = productRes.rows[0];
+    for (const item of items) {
+      const { productName, quantity, costPrice, sellingPrice } = item;
 
-    if (!product) {
-      throw new Error('Produk tidak ditemukan.');
+      const productRes = await client.query('SELECT * FROM products WHERE name = $1', [productName]);
+      const product = productRes.rows[0];
+
+      if (!product) {
+        throw new Error(`Produk ${productName} tidak ditemukan.`);
+      }
+      if (product.stock < quantity) {
+        throw new Error(`Stok tidak mencukupi untuk produk ${productName}.`);
+      }
+
+      const newStock = product.stock - quantity;
+      await client.query('UPDATE products SET stock = $1 WHERE name = $2', [newStock, productName]);
+
+      const profitPerUnit = sellingPrice - costPrice;
+      const total = quantity * sellingPrice;
+      const date = getLocalDate();
+      
+      await client.query(
+        'INSERT INTO transactions (productName, quantity, costPrice, sellingPrice, profitPerUnit, total, date) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+        [productName, quantity, costPrice, sellingPrice, profitPerUnit, total, date]
+      );
     }
-    if (product.stock < quantity) {
-      throw new Error('Stok tidak mencukupi.');
-    }
-
-    const newStock = product.stock - quantity;
-    await client.query('UPDATE products SET stock = $1 WHERE name = $2', [newStock, productName]);
-
-    const profitPerUnit = sellingPrice - costPrice;
-    const total = quantity * sellingPrice;
-    const date = getLocalDate();
-    
-    const insertRes = await client.query(
-      'INSERT INTO transactions (productName, quantity, costPrice, sellingPrice, profitPerUnit, total, date) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id',
-      [productName, quantity, costPrice, sellingPrice, profitPerUnit, total, date]
-    );
 
     await client.query('COMMIT');
-    res.status(201).json({ id: insertRes.rows[0].id });
+    res.status(201).json({ message: 'Transaksi berhasil dicatat.' });
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(400).json({ error: err.message });
@@ -176,11 +180,12 @@ app.put('/api/transactions/:id', async (req, res) => {
     const { quantity, costprice, sellingPrice } = req.body;
     const client = await pool.connect();
 
+    let originalTransaction = null;
     try {
         await client.query('BEGIN');
 
         const transactionRes = await client.query('SELECT * FROM transactions WHERE id = $1', [id]);
-        const originalTransaction = transactionRes.rows[0];
+        originalTransaction = transactionRes.rows[0];
 
         if (!originalTransaction) {
             throw new Error('Transaksi tidak ditemukan.');
@@ -188,8 +193,10 @@ app.put('/api/transactions/:id', async (req, res) => {
 
         const quantityDifference = quantity - originalTransaction.quantity;
 
-        const productRes = await client.query('SELECT * FROM products WHERE name = $1', [originalTransaction.productName]);
+        console.log('originalTransaction.productName:', originalTransaction.productName);
+        const productRes = await client.query('SELECT * FROM products WHERE name ILIKE $1', [originalTransaction.productName]);
         const product = productRes.rows[0];
+        console.log('Product found by ILIKE query:', product);
 
         if (!product) {
             throw new Error('Produk tidak ditemukan.');
@@ -212,7 +219,14 @@ app.put('/api/transactions/:id', async (req, res) => {
         res.json({ message: 'Transaksi berhasil diperbarui.' });
     } catch (err) {
         await client.query('ROLLBACK');
-        res.status(400).json({ error: err.message });
+        console.error('Error in PUT /api/transactions/:id:', err.message);
+        res.status(400).json({
+            error: err.message,
+            debug: {
+                originalTransaction: originalTransaction,
+                // Add other relevant debug info here if needed
+            }
+        });
     } finally {
         client.release();
     }

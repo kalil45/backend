@@ -25,7 +25,7 @@ const initializeDatabase = async () => {
         id SERIAL PRIMARY KEY,
         productName TEXT NOT NULL,
         quantity INTEGER NOT NULL,
-        costPrice NUMERIC NOT NULL,
+        costprice NUMERIC NOT NULL,
         sellingPrice NUMERIC NOT NULL,
         profitPerUnit NUMERIC,
         total NUMERIC,
@@ -37,7 +37,7 @@ const initializeDatabase = async () => {
         name TEXT NOT NULL UNIQUE,
         stock INTEGER NOT NULL,
         price NUMERIC NOT NULL,
-        costPrice NUMERIC NOT NULL
+        costprice NUMERIC NOT NULL
       )`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS expenses (
@@ -86,34 +86,45 @@ const getLocalDate = () => {
 
 // TRANSACTIONS API
 app.post('/api/transactions', async (req, res) => {
+  console.log('Request body:', req.body);
   const { items } = req.body;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
     for (const item of items) {
-      const { productName, quantity, costPrice, sellingPrice } = item;
+      const { productName, quantity, costprice, sellingPrice } = item;
 
-      const productRes = await client.query('SELECT * FROM products WHERE name = $1', [productName]);
-      const product = productRes.rows[0];
+      let product;
+      try {
+        const productRes = await client.query('SELECT * FROM products WHERE name = $1', [productName]);
+        product = productRes.rows[0];
+      } catch (e) {
+        throw new Error(`Gagal mengambil data produk: ${e.message}`);
+      }
 
       if (!product) {
-        throw new Error(`Produk ${productName} tidak ditemukan.`);
+        throw new Error(`Produk ${productName} tidak ditemukan di database.`);
       }
+
       if (product.stock < quantity) {
         throw new Error(`Stok tidak mencukupi untuk produk ${productName}.`);
+      }
+
+      if (typeof product.costprice === 'undefined') {
+        throw new Error(`Kolom 'costprice' tidak ditemukan di produk ${productName}. Pastikan nama kolom di database sudah benar.`);
       }
 
       const newStock = product.stock - quantity;
       await client.query('UPDATE products SET stock = $1 WHERE name = $2', [newStock, productName]);
 
-      const profitPerUnit = sellingPrice - costPrice;
+      const profitPerUnit = sellingPrice - costprice;
       const total = quantity * sellingPrice;
       const date = getLocalDate();
       
       await client.query(
-        'INSERT INTO transactions (productName, quantity, costPrice, sellingPrice, profitPerUnit, total, date) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-        [productName, quantity, costPrice, sellingPrice, profitPerUnit, total, date]
+        'INSERT INTO transactions (productName, quantity, costprice, sellingPrice, profitPerUnit, total, date) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+        [productName, quantity, costprice, sellingPrice, profitPerUnit, total, date]
       );
     }
 
@@ -193,23 +204,31 @@ app.put('/api/transactions/:id', async (req, res) => {
 
         const quantityDifference = quantity - originalTransaction.quantity;
 
-        console.log('originalTransaction.productName:', originalTransaction.productName);
-        const productRes = await client.query('SELECT * FROM products WHERE name ILIKE $1', [originalTransaction.productName]);
-        const product = productRes.rows[0];
-        console.log('Product found by ILIKE query:', product);
+        let product;
+        try {
+            const productRes = await client.query('SELECT * FROM products WHERE name ILIKE $1', [originalTransaction.productName]);
+            product = productRes.rows[0];
+        } catch (e) {
+            throw new Error(`Gagal mengambil data produk: ${e.message}`);
+        }
 
         if (!product) {
-            throw new Error('Produk tidak ditemukan.');
+            throw new Error(`Produk ${originalTransaction.productName} tidak ditemukan di database.`);
         }
+
         if (product.stock < quantityDifference) {
             throw new Error('Stok tidak mencukupi untuk pembaruan ini.');
+        }
+
+        if (typeof product.costprice === 'undefined') {
+            throw new Error(`Kolom 'costprice' tidak ditemukan di produk ${originalTransaction.productName}. Pastikan nama kolom di database sudah benar.`);
         }
 
         const newStock = product.stock - quantityDifference;
         await client.query('UPDATE products SET stock = $1 WHERE name = $2', [newStock, originalTransaction.productName]);
 
         const newTotal = quantity * sellingPrice;
-        const newProfitPerUnit = sellingPrice - costPrice;
+        const newProfitPerUnit = sellingPrice - costprice;
         await client.query(
             'UPDATE transactions SET quantity = $1, costprice = $2, sellingPrice = $3, total = $4, profitPerUnit = $5 WHERE id = $6',
             [quantity, costprice, sellingPrice, newTotal, newProfitPerUnit, id]

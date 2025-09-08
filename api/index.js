@@ -146,6 +146,7 @@ app.post('/transactions', async (req, res) => {
       [productName, quantity, costPrice, sellingPrice, profitPerUnit, total, date, accountName]
     );
 
+    await client.query('UPDATE accounts SET balance = balance + $1 WHERE name = $2', [total, accountName]);
     await client.query('COMMIT');
     res.status(201).json({ id: insertRes.rows[0].id });
   } catch (err) {

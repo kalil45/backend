@@ -62,6 +62,7 @@ const initializeDatabase = async () => {
         date DATE,
         account_name TEXT
       )`);
+    await client.query(`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS account_name TEXT`); // Add this line
     await client.query(`
       CREATE TABLE IF NOT EXISTS products (
         id SERIAL PRIMARY KEY,

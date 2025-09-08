@@ -9,7 +9,33 @@ app.use(express.json());
 
 // Konfigurasi Pool Koneksi PostgreSQL
 const pool = new Pool({
-  connectionString: 'postgresql://neondb_owner:npg_VjRmJoXuk4T8@ep-morning-frost-a1skhmpr-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require',
+  connectionString: process.env.DATABASE_URL,
+});
+
+
+// ACCOUNTS API
+app.get('/accounts', async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT * FROM accounts");
+    res.json(rows);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+});
+
+app.post('/accounts', async (req, res) => {
+  try {
+    const { name, balance } = req.body;
+    const newAccount = await pool.query(
+      "INSERT INTO accounts (name, balance) VALUES ($1, $2) RETURNING *",
+      [name, balance]
+    );
+    res.status(201).json(newAccount.rows[0]);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
 });
 
 // --- PERBAIKAN UNTUK DATABASE INITIALIZATION ---
@@ -25,7 +51,7 @@ const initializeDatabase = async () => {
         id SERIAL PRIMARY KEY,
         productName TEXT NOT NULL,
         quantity INTEGER NOT NULL,
-        costprice NUMERIC NOT NULL,
+        costPrice NUMERIC NOT NULL,
         sellingPrice NUMERIC NOT NULL,
         profitPerUnit NUMERIC,
         total NUMERIC,
@@ -37,7 +63,7 @@ const initializeDatabase = async () => {
         name TEXT NOT NULL UNIQUE,
         stock INTEGER NOT NULL,
         price NUMERIC NOT NULL,
-        costprice NUMERIC NOT NULL
+        costPrice NUMERIC NOT NULL
       )`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS expenses (
@@ -52,6 +78,12 @@ const initializeDatabase = async () => {
         amount NUMERIC NOT NULL,
         date DATE NOT NULL,
         type TEXT NOT NULL
+      )`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS accounts (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        balance NUMERIC NOT NULL DEFAULT 0
       )`);
     console.log('Database tables checked/created successfully.');
     dbInitialized = true; // Tandai bahwa inisialisasi sudah selesai
@@ -85,51 +117,36 @@ const getLocalDate = () => {
 };
 
 // TRANSACTIONS API
-app.post('/api/transactions', async (req, res) => {
-  console.log('Request body:', req.body);
-  const { items } = req.body;
+app.post('/transactions', async (req, res) => {
+  const { productName, quantity, costPrice, sellingPrice } = req.body;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    for (const item of items) {
-      const { productName, quantity, costprice, sellingPrice } = item;
+    const productRes = await client.query('SELECT * FROM products WHERE name = $1', [productName]);
+    const product = productRes.rows[0];
 
-      let product;
-      try {
-        const productRes = await client.query('SELECT * FROM products WHERE name = $1', [productName]);
-        product = productRes.rows[0];
-      } catch (e) {
-        throw new Error(`Gagal mengambil data produk: ${e.message}`);
-      }
-
-      if (!product) {
-        throw new Error(`Produk ${productName} tidak ditemukan di database.`);
-      }
-
-      if (product.stock < quantity) {
-        throw new Error(`Stok tidak mencukupi untuk produk ${productName}.`);
-      }
-
-      if (typeof product.costprice === 'undefined') {
-        throw new Error(`Kolom 'costprice' tidak ditemukan di produk ${productName}. Pastikan nama kolom di database sudah benar.`);
-      }
-
-      const newStock = product.stock - quantity;
-      await client.query('UPDATE products SET stock = $1 WHERE name = $2', [newStock, productName]);
-
-      const profitPerUnit = sellingPrice - costprice;
-      const total = quantity * sellingPrice;
-      const date = getLocalDate();
-      
-      await client.query(
-        'INSERT INTO transactions (productName, quantity, costprice, sellingPrice, profitPerUnit, total, date) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-        [productName, quantity, costprice, sellingPrice, profitPerUnit, total, date]
-      );
+    if (!product) {
+      throw new Error('Produk tidak ditemukan.');
+    }
+    if (product.stock < quantity) {
+      throw new Error('Stok tidak mencukupi.');
     }
 
+    const newStock = product.stock - quantity;
+    await client.query('UPDATE products SET stock = $1 WHERE name = $2', [newStock, productName]);
+
+    const profitPerUnit = sellingPrice - costPrice;
+    const total = quantity * sellingPrice;
+    const date = getLocalDate();
+    
+    const insertRes = await client.query(
+      'INSERT INTO transactions (productName, quantity, costPrice, sellingPrice, profitPerUnit, total, date) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id',
+      [productName, quantity, costPrice, sellingPrice, profitPerUnit, total, date]
+    );
+
     await client.query('COMMIT');
-    res.status(201).json({ message: 'Transaksi berhasil dicatat.' });
+    res.status(201).json({ id: insertRes.rows[0].id });
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(400).json({ error: err.message });
@@ -138,7 +155,7 @@ app.post('/api/transactions', async (req, res) => {
   }
 });
 
-app.get('/api/transactions', async (req, res) => {
+app.get('/transactions', async (req, res) => {
     const { startDate, endDate } = req.query;
     let sql = `SELECT * FROM transactions`;
     const params = [];
@@ -156,13 +173,13 @@ app.get('/api/transactions', async (req, res) => {
     }
 });
 
-app.delete('/api/transactions/:id', async (req, res) => {
+app.delete('/transactions/:id', async (req, res) => {
     const { id } = req.params;
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
 
-        const transactionRes = await client.query('SELECT * FROM transactions WHERE id = $1', [id]);
+        const transactionRes = await pool.query('SELECT * FROM transactions WHERE id = $1', [id]);
         const transaction = transactionRes.rows[0];
 
         if (!transaction) {
@@ -171,7 +188,7 @@ app.delete('/api/transactions/:id', async (req, res) => {
 
         await client.query('UPDATE products SET stock = stock + $1 WHERE name = $2', [transaction.quantity, transaction.productName]);
         
-        const deleteRes = await client.query('DELETE FROM transactions WHERE id = $1', [id]);
+        const deleteRes = await pool.query('DELETE FROM transactions WHERE id = $1', [id]);
         if (deleteRes.rowCount === 0) {
             throw new Error('Gagal menghapus transaksi.');
         }
@@ -186,7 +203,7 @@ app.delete('/api/transactions/:id', async (req, res) => {
     }
 });
 
-app.put('/api/transactions/:id', async (req, res) => {
+app.put('/transactions/:id', async (req, res) => {
     const { id } = req.params;
     const { quantity, costprice, sellingPrice } = req.body;
     const client = await pool.connect();
@@ -195,7 +212,7 @@ app.put('/api/transactions/:id', async (req, res) => {
     try {
         await client.query('BEGIN');
 
-        const transactionRes = await client.query('SELECT * FROM transactions WHERE id = $1', [id]);
+        const transactionRes = await pool.query('SELECT * FROM transactions WHERE id = $1', [id]);
         originalTransaction = transactionRes.rows[0];
 
         if (!originalTransaction) {
@@ -204,31 +221,23 @@ app.put('/api/transactions/:id', async (req, res) => {
 
         const quantityDifference = quantity - originalTransaction.quantity;
 
-        let product;
-        try {
-            const productRes = await client.query('SELECT * FROM products WHERE name ILIKE $1', [originalTransaction.productName]);
-            product = productRes.rows[0];
-        } catch (e) {
-            throw new Error(`Gagal mengambil data produk: ${e.message}`);
-        }
+        console.log('originalTransaction.productName:', originalTransaction.productName);
+        const productRes = await pool.query('SELECT * FROM products WHERE name ILIKE $1', [originalTransaction.productName]);
+        const product = productRes.rows[0];
+        console.log('Product found by ILIKE query:', product);
 
         if (!product) {
-            throw new Error(`Produk ${originalTransaction.productName} tidak ditemukan di database.`);
+            throw new Error('Produk tidak ditemukan.');
         }
-
         if (product.stock < quantityDifference) {
             throw new Error('Stok tidak mencukupi untuk pembaruan ini.');
-        }
-
-        if (typeof product.costprice === 'undefined') {
-            throw new Error(`Kolom 'costprice' tidak ditemukan di produk ${originalTransaction.productName}. Pastikan nama kolom di database sudah benar.`);
         }
 
         const newStock = product.stock - quantityDifference;
         await client.query('UPDATE products SET stock = $1 WHERE name = $2', [newStock, originalTransaction.productName]);
 
         const newTotal = quantity * sellingPrice;
-        const newProfitPerUnit = sellingPrice - costprice;
+        const newProfitPerUnit = sellingPrice - costPrice;
         await client.query(
             'UPDATE transactions SET quantity = $1, costprice = $2, sellingPrice = $3, total = $4, profitPerUnit = $5 WHERE id = $6',
             [quantity, costprice, sellingPrice, newTotal, newProfitPerUnit, id]
@@ -253,7 +262,7 @@ app.put('/api/transactions/:id', async (req, res) => {
 
 
 // PRODUCTS API
-app.post('/api/products', async (req, res) => {
+app.post('/products', async (req, res) => {
     const { name, stock, price, costprice } = req.body;
     try {
         const result = await pool.query(
@@ -266,7 +275,7 @@ app.post('/api/products', async (req, res) => {
     }
 });
 
-app.get('/api/products', async (req, res) => {
+app.get('/products', async (req, res) => {
     const { search } = req.query;
     let sql = `SELECT * FROM products`;
     let params = [];
@@ -283,7 +292,7 @@ app.get('/api/products', async (req, res) => {
     }
 });
 
-app.put('/api/products/:id', async (req, res) => {
+app.put('/products/:id', async (req, res) => {
     const { id } = req.params;
     const { stock } = req.body;
     try {
@@ -298,7 +307,7 @@ app.put('/api/products/:id', async (req, res) => {
     }
 });
 
-app.delete('/api/products/:id', async (req, res) => {
+app.delete('/products/:id', async (req, res) => {
     const { id } = req.params;
     try {
         const productRes = await pool.query('SELECT name FROM products WHERE id = $1', [id]);
@@ -325,13 +334,13 @@ app.delete('/api/products/:id', async (req, res) => {
 
 
 // EXPENSES API
-app.post('/api/expenses', async (req, res) => {
+app.post('/expenses', async (req, res) => {
     const { description, amount } = req.body;
     const date = getLocalDate();
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        const expenseRes = await client.query(
+        const expenseRes = await pool.query(
             'INSERT INTO expenses (description, amount, date) VALUES ($1, $2, $3) RETURNING id',
             [description, amount, date]
         );
@@ -349,7 +358,7 @@ app.post('/api/expenses', async (req, res) => {
     }
 });
 
-app.get('/api/expenses', async (req, res) => {
+app.get('/expenses', async (req, res) => {
     const { startDate, endDate } = req.query;
     let sql = `SELECT * FROM expenses`;
     const params = [];
@@ -366,14 +375,14 @@ app.get('/api/expenses', async (req, res) => {
     }
 });
 
-app.put('/api/expenses/:id', async (req, res) => {
+app.put('/expenses/:id', async (req, res) => {
     const { id } = req.params;
     const { description, amount } = req.body;
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
 
-        const expenseRes = await client.query('SELECT * FROM expenses WHERE id = $1', [id]);
+        const expenseRes = await pool.query('SELECT * FROM expenses WHERE id = $1', [id]);
         const originalExpense = expenseRes.rows[0];
         if (!originalExpense) {
             throw new Error('Expense not found.');
@@ -396,13 +405,13 @@ app.put('/api/expenses/:id', async (req, res) => {
     }
 });
 
-app.delete('/api/expenses/:id', async (req, res) => {
+app.delete('/expenses/:id', async (req, res) => {
     const { id } = req.params;
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
 
-        const expenseRes = await client.query('SELECT * FROM expenses WHERE id = $1', [id]);
+        const expenseRes = await pool.query('SELECT * FROM expenses WHERE id = $1', [id]);
         const expense = expenseRes.rows[0];
         if (!expense) {
             throw new Error('Expense not found.');
@@ -410,7 +419,7 @@ app.delete('/api/expenses/:id', async (req, res) => {
 
         await client.query('INSERT INTO capital_history (amount, date, type) VALUES ($1, $2, $3)', [expense.amount, expense.date, 'add']);
         
-        const deleteRes = await client.query('DELETE FROM expenses WHERE id = $1', [id]);
+        const deleteRes = await pool.query('DELETE FROM expenses WHERE id = $1', [id]);
         if (deleteRes.rowCount === 0) {
             throw new Error('Failed to delete expense.');
         }
@@ -427,7 +436,7 @@ app.delete('/api/expenses/:id', async (req, res) => {
 
 
 // CAPITAL API
-app.post('/api/capital', async (req, res) => {
+app.post('/capital', async (req, res) => {
     const { amount, type } = req.body;
     const date = getLocalDate();
     try {
@@ -441,7 +450,7 @@ app.post('/api/capital', async (req, res) => {
     }
 });
 
-app.get('/api/capital/total', async (req, res) => {
+app.get('/capital/total', async (req, res) => {
     try {
         const { rows } = await pool.query(`SELECT SUM(CASE WHEN type = 'add' THEN amount ELSE -amount END) AS totalCapital FROM capital_history`);
         const totalCapital = rows[0].totalcapital || 0;

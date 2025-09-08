@@ -46,15 +46,40 @@ client.release();
 
 // PRODUCTS API
 app.post('/api/products', async (req, res) => {
-const { name, stock, price, costPrice } = req.body;
+const { name, stock, price, costPrice, accountName } = req.body; // Added accountName
+const client = await pool.connect(); // Get a client for transaction
 try {
-const result = await pool.query(
-'INSERT INTO products (name, stock, price, costP
+await client.query('BEGIN'); // Start transaction
+
+// Deduct from account
+const accountRes = await client.query('SELECT * FROM accounts WHERE name = $1 FOR UPDATE', [accountName]);
+const account = accountRes.rows[0];
+
+if (!account) {
+  throw new Error('Account not found.');
+}
+
+if (account.balance < costPrice) { // Deduct costPrice
+  throw new Error('Insufficient balance in selected account.');
+}
+
+const newBalance = account.balance - costPrice;
+await client.query('UPDATE accounts SET balance = $1 WHERE id = $2', [newBalance, account.id]);
+
+// Insert product
+const result = await client.query(
+'INSERT INTO products (name, stock, price, costPrice) VALUES ($1, $2, $3, $4) RETURNING id',
 [name, stock, price, costPrice]
 );
-res.status(201).json({ id: result.rows[0].id });
+
+await client.query('COMMIT'); // Commit transaction
+res.status(201).json({ id: expenseRes.rows[0].id, message: 'Expense added and account updated successfully.' });
 } catch (err) {
+await client.query('ROLLBACK'); // Rollback on error
+console.error(err.message);
 res.status(400).json({ error: err.message });
+} finally {
+client.release(); // Release client
 }
 });
 
@@ -116,77 +141,50 @@ res.status(500).json({ error: err.message });
 });
 
 
-// EXPENSES API
+//EXPENSES API
 app.post('/api/expenses', async (req, res) => {
-const { description, amount } = req.body;
-const date = getLocalDate();
+const { description, amount, accountName } = req.body; // Added accountName
+const date = getLocalDate(); // Assuming getLocalDate() is defined elsewhere
 const client = await pool.connect();
 try {
 await client.query('BEGIN');
+
+// Deduct from account
+const accountRes = await client.query('SELECT * FROM accounts WHERE name = $1 FOR UPDATE', [accountName]);
+const account = accountRes.rows[0];
+
+if (!account) {
+throw new Error('Account not found.');
+}
+
+if (account.balance < amount) {
+throw new Error('Insufficient balance in selected account.');
+}
+
+const newBalance = account.balance - amount;
+await client.query('UPDATE accounts SET balance = $1 WHERE id = $2', [newBalance, account.id]);
+
+// Original expense insertion logic
 const expenseRes = await client.query(
-'INSERT INTO expenses (description, amount, date
+'INSERT INTO expenses (description, amount, date) VALUES ($1, $2, $3) RETURNING id',
 [description, amount, date]
 );
 await client.query(
-'INSERT INTO capital_history (amount, date, type
+'INSERT INTO capital_history (amount, date, type) VALUES ($1, $2, $3)',
 [amount, date, 'subtract']
 );
+
 await client.query('COMMIT');
-res.status(201).json({ id: expenseRes.rows[0].id });
+res.status(201).json({ id: expenseRes.rows[0].id, message: 'Expense added and account updated successfully.' });
 } catch (err) {
 await client.query('ROLLBACK');
+console.error(err.message);
 res.status(400).json({ error: err.message });
 } finally {
 client.release();
 }
 });
 
-app.get('/api/expenses', async (req, res) => {
-const { startDate, endDate } = req.query;
-let sql = `SELECT * FROM expenses`;
-const params = [];
-if (startDate && endDate) {
-sql += ' WHERE date BETWEEN $1 AND $2';
-params.push(startDate, endDate);
-}
-sql += ' ORDER BY date DESC, id DESC';
-try {
-const { rows } = await pool.query(sql, params);
-res.json(rows);
-} catch (err) {
-res.status(400).json({ error: err.message });
-}
-});
-
-app.put('/api/expenses/:id', async (req, res) => {
-const { id } = req.params;
-const { description, amount } = req.body;
-const client = await pool.connect();
-try {
-await client.query('BEGIN');
-
-const expenseRes = await client.query('SELECT * FROM
-const originalExpense = expenseRes.rows[0];
-if (!originalExpense) {
-throw new Error('Expense not found.');
-}
-
-// Restore old capital amount
-await client.query('INSERT INTO capital_history (amo
-// Subtract new capital amount
-await client.query('INSERT INTO capital_history (amo
-
-await client.query('UPDATE expenses SET description
-
-await client.query('COMMIT');
-res.json({ message: 'Expense updated successfully.'
-} catch (err) {
-await client.query('ROLLBACK');
-res.status(400).json({ error: err.message });
-} finally {
-client.release();
-}
-});
 
 app.delete('/api/expenses/:id', async (req, res) => {
 const { id } = req.params;
@@ -202,7 +200,7 @@ throw new Error('Expense not found.');
 
 await client.query('INSERT INTO capital_history (amo
 
-const deleteRes = await client.query('DELETE FROM ex
+const deleteRes = await pool.query('DELETE FROM ex
 if (deleteRes.rowCount === 0) {
 throw new Error('Failed to delete expense.');
 }
@@ -244,8 +242,85 @@ res.status(400).json({ error: err.message });
 });
 
 
+// ACCOUNTS API
+app.post('/api/accounts', async (req, res) => {
+  const { name, balance } = req.body;
+  try {
+    const result = await pool.query(
+      'INSERT INTO accounts (name, balance) VALUES ($1, $2) RETURNING id',
+      [name, balance]
+    );
+    res.status(201).json({ id: result.rows[0].id, name, balance });
+  } catch (err) {
+    console.error(err.message);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/accounts', async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM accounts ORDER BY name ASC');
+    res.json(rows);
+  } catch (err) {
+    console.error(err.message);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.put('/api/accounts/deduct', async (req, res) => {
+  const { accountName, amount } = req.body;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const accountRes = await client.query('SELECT * FROM accounts WHERE name = $1 FOR UPDATE', [accountName]);
+    const account = accountRes.rows[0];
+
+    if (!account) {
+      throw new Error('Account not found.');
+    }
+
+    if (account.balance < amount) {
+      throw new Error('Insufficient balance.');
+    }
+
+    const newBalance = account.balance - amount;
+    await client.query('UPDATE accounts SET balance = $1 WHERE id = $2', [newBalance, account.id]);
+
+    await client.query('COMMIT');
+    res.json({ message: 'Balance deducted successfully.', newBalance });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error(err.message);
+    res.status(400).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+
 // Start the server and initialize database
 app.listen(port, () => {
 console.log(`Server running on port ${port}`);
 initializeDatabase();
 });
+
+function initializeDatabase() {
+    // ... (existing table creations) ...
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS capital_history (
+            id SERIAL PRIMARY KEY,
+            amount NUMERIC(10, 2) NOT NULL,
+            date DATE NOT NULL,
+            type VARCHAR(50) NOT NULL
+        );
+    `);
+
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS accounts (
+            id SERIAL PRIMARY KEY,
+            name VARCHAR(255) UNIQUE NOT NULL,
+            balance NUMERIC(10, 2) NOT NULL DEFAULT 0
+        );
+    `);
+}

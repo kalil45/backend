@@ -55,7 +55,8 @@ const initializeDatabase = async () => {
         sellingPrice NUMERIC NOT NULL,
         profitPerUnit NUMERIC,
         total NUMERIC,
-        date DATE
+        date DATE,
+        account_name TEXT
       )`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS products (
@@ -118,7 +119,7 @@ const getLocalDate = () => {
 
 // TRANSACTIONS API
 app.post('/transactions', async (req, res) => {
-  const { productName, quantity, costPrice, sellingPrice } = req.body;
+  const { productName, quantity, costPrice, sellingPrice, accountName } = req.body;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -141,8 +142,8 @@ app.post('/transactions', async (req, res) => {
     const date = getLocalDate();
     
     const insertRes = await client.query(
-      'INSERT INTO transactions (productName, quantity, costPrice, sellingPrice, profitPerUnit, total, date) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id',
-      [productName, quantity, costPrice, sellingPrice, profitPerUnit, total, date]
+      'INSERT INTO transactions (productName, quantity, costPrice, sellingPrice, profitPerUnit, total, date, account_name) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id',
+      [productName, quantity, costPrice, sellingPrice, profitPerUnit, total, date, accountName]
     );
 
     await client.query('COMMIT');

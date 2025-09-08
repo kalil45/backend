@@ -222,6 +222,51 @@ app.delete('/accounts/:id', async (req, res) => {
   }
 });
 
+app.put('/accounts/:id', async (req, res) => {
+  const { id } = req.params;
+  const { name, balance } = req.body;
+  try {
+    const result = await pool.query(
+      'UPDATE accounts SET name = $1, balance = $2 WHERE id = $3 RETURNING *'
+      [name, balance, id]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Account not found.' });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error in PUT /accounts/:id:', err);
+    res.status(400).json({ error: err.message || 'An unknown error occurred' });
+  }
+});
+
+app.delete('/accounts/:id', async (req, res) => {
+  const { id } = req.params;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Check if account has any associated transactions
+    const transactionCheck = await client.query('SELECT 1 FROM transactions WHERE account_name = (SELECT name FROM accounts WHERE id = $1) LIMIT 1', [id]);
+    if (transactionCheck.rowCount > 0) {
+      throw new Error('Tidak dapat menghapus akun karena sudah ada transaksi terkait.');
+    }
+
+    const result = await pool.query('DELETE FROM accounts WHERE id = $1', [id]);
+    if (result.rowCount === 0) {
+      throw new Error('Account not found.');
+    }
+    await client.query('COMMIT');
+    res.json({ message: 'Account deleted successfully.' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error in DELETE /accounts/:id:', err);
+    res.status(400).json({ error: err.message || 'An unknown error occurred' });
+  } finally {
+    client.release();
+  }
+});
+
 // --- PERBAIKAN UNTUK DATABASE INITIALIZATION ---
 let dbInitialized = false;
 

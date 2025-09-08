@@ -144,6 +144,7 @@ app.post('/transactions', async (req, res) => {
 
     const profitPerUnit = sellingPrice - costPrice;
     const total = quantity * sellingPrice;
+    const totalCost = quantity * costPrice; // Calculate total cost
     const date = getLocalDate();
     
     const insertRes = await client.query(
@@ -151,7 +152,8 @@ app.post('/transactions', async (req, res) => {
       [productName, quantity, costPrice, sellingPrice, profitPerUnit, total, date, accountName]
     );
 
-    await client.query('UPDATE accounts SET balance = balance + $1 WHERE name = $2', [total, accountName]);
+    await client.query('UPDATE accounts SET balance = balance - $1 WHERE name = $2', [totalCost, accountName]); // Deduct totalCost from account balance
+    await client.query('INSERT INTO capital_history (amount, date, type) VALUES ($1, $2, $3)', [total, date, 'add']);
     await client.query('COMMIT');
     res.status(201).json({ id: insertRes.rows[0].id });
   } catch (err) {

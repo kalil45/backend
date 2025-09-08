@@ -155,7 +155,8 @@ app.post('/transactions', async (req, res) => {
     res.status(201).json({ id: insertRes.rows[0].id });
   } catch (err) {
     await client.query('ROLLBACK');
-    res.status(400).json({ error: err.message });
+    console.error('Error in POST /transactions:', err); // Add more explicit logging
+    res.status(400).json({ error: err.message || 'An unknown error occurred' }); // Ensure message is sent
   } finally {
     client.release();
   }

@@ -245,13 +245,50 @@ app.post('/transactions', async (req, res) => {
       const profitPerUnit = sellingPrice - costPrice;
       const total = quantity * sellingPrice;
       const totalCost = quantity * costPrice; // Calculate total cost
-      
+      const date = getLocalDate(); // Ensure date is available
+
+      if (paymentMethod === 'BSI Transfer') {
+        // Logic for BSI Transfer sales
+        // Credit the selected account (e.g., BSI account) with the total selling price
+        await client.query('UPDATE accounts SET balance = balance + $1 WHERE name = $2', [total, accountName]);
+
+        // Debit the "Modal Tersisa" account with the total cost price
+        const modalTersisaAccountName = 'Modal Tersisa';
+        const modalTersisaAccountRes = await client.query('SELECT * FROM accounts WHERE name = $1 FOR UPDATE', [modalTersisaAccountName]);
+        const modalTersisaAccount = modalTersisaAccountRes.rows[0];
+
+        if (!modalTersisaAccount) {
+          throw new Error(`Akun '${modalTersisaAccountName}' tidak ditemukan. Mohon buat akun ini terlebih dahulu.`);
+        }
+        if (modalTersisaAccount.balance < totalCost) {
+          throw new Error(`Saldo di akun '${modalTersisaAccountName}' tidak mencukupi untuk mengurangi harga modal.`);
+        }
+        await client.query('UPDATE accounts SET balance = balance - $1 WHERE name = $2', [totalCost, modalTersisaAccountName]);
+
+      } else {
+        // Original logic for other sales (e.g., cash sales)
+        await client.query('UPDATE accounts SET balance = balance - $1 WHERE name = $2', [totalCost, accountName]); // Deduct totalCost from account balance
+      }
+
+      // Debit the "Modal Tersisa" account with the total cost price
+      const modalTersisaAccountName = 'Modal Tersisa'; // Hardcoded name for the global account
+      const modalTersisaAccountRes = await client.query('SELECT * FROM accounts WHERE name = $1 FOR UPDATE', [modalTersisaAccountName]);
+      const modalTersisaAccount = modalTersisaAccountRes.rows[0];
+
+      if (!modalTersisaAccount) {
+        throw new Error(`Akun '${modalTersisaAccountName}' tidak ditemukan. Mohon buat akun ini terlebih dahulu.`);
+      }
+      if (modalTersisaAccount.balance < totalCost) {
+        throw new Error(`Saldo di akun '${modalTersisaAccountName}' tidak mencukupi untuk mengurangi harga modal.`);
+      }
+      await client.query('UPDATE accounts SET balance = balance - $1 WHERE name = $2', [totalCost, modalTersisaAccountName]);
+
+
       const insertRes = await client.query(
-        'INSERT INTO transactions (productName, quantity, costPrice, sellingPrice, profitPerUnit, total, date, account_name, type, paymentMethod) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id', // Added paymentMethod
-        [productName, quantity, costPrice, sellingPrice, profitPerUnit, total, date, accountName, 'sale', paymentMethod] // Added paymentMethod
+        'INSERT INTO transactions (productName, quantity, costPrice, sellingPrice, profitPerUnit, total, date, account_name, type, paymentMethod) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id',
+        [productName, quantity, costPrice, sellingPrice, profitPerUnit, total, date, accountName, 'sale', paymentMethod || 'Cash'] // Default to 'Cash' if paymentMethod is not provided
       );
 
-      await client.query('UPDATE accounts SET balance = balance - $1 WHERE name = $2', [totalCost, accountName]); // Deduct totalCost from account balance
       await client.query('INSERT INTO capital_history (amount, date, type) VALUES ($1, $2, $3)', [total, date, 'add']);
       await client.query('COMMIT');
       res.status(201).json({ id: insertRes.rows[0].id });

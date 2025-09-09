@@ -334,20 +334,29 @@ app.post('/api/transactions', async (req, res) => {
       await client.query('UPDATE products SET stock = $1 WHERE id = $2', [newStock, productId]);
     }
 
-    // 2. Deduct amount from account balance
-    const accountRes = await client.query('SELECT * FROM accounts WHERE name = $1 FOR UPDATE', [accountName]);
-    const account = accountRes.rows[0];
+    // 2. Handle account balance updates for transfer
+    // Deduct from the source account (accountName from form)
+    const sourceAccountRes = await client.query('SELECT * FROM accounts WHERE name = $1 FOR UPDATE', [accountName]);
+    const sourceAccount = sourceAccountRes.rows[0];
 
-    if (!account) {
-      throw new Error('Akun tidak ditemukan.');
+    if (!sourceAccount) {
+      throw new Error('Akun sumber tidak ditemukan.');
     }
 
-    // For sales, deduct from account. For other types, you might add or handle differently.
-    // Assuming 'sale' means money comes IN, so ADD to account balance.
-    // If 'sale' means money goes OUT (e.g., for a purchase), then DEDUCT.
-    // Based on "Penjualan BSI", it's a sale, so money comes IN.
-    const newBalance = parseFloat(account.balance) + parseFloat(total);
-    await client.query('UPDATE accounts SET balance = $1 WHERE id = $2', [newBalance, account.id]);
+    const newSourceBalance = parseFloat(sourceAccount.balance) - parseFloat(total);
+    await client.query('UPDATE accounts SET balance = $1 WHERE id = $2', [newSourceBalance, sourceAccount.id]);
+
+    // Add to the destination BSI account
+    const bsiAccountName = 'Nama AKun Modal BSI'; // Use the exact name provided by the user
+    const bsiAccountRes = await client.query('SELECT * FROM accounts WHERE name = $1 FOR UPDATE', [bsiAccountName]);
+    const bsiAccount = bsiAccountRes.rows[0];
+
+    if (!bsiAccount) {
+      throw new Error(`Akun BSI (${bsiAccountName}) tidak ditemukan. Pastikan nama akun benar.`);
+    }
+
+    const newBsiBalance = parseFloat(bsiAccount.balance) + parseFloat(total);
+    await client.query('UPDATE accounts SET balance = $1 WHERE id = $2', [newBsiBalance, bsiAccount.id]);
 
     // 3. Insert transaction record
     const result = await client.query(

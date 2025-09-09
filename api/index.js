@@ -370,11 +370,11 @@ app.put('/transactions/:id', async (req, res) => {
 
 // PRODUCTS API
 app.post('/products', async (req, res) => {
-    const { name, stock, price, costprice } = req.body;
+    const { name, stock, price, costPrice } = req.body; // Changed costprice to costPrice
     try {
         const result = await pool.query(
-            'INSERT INTO products (name, stock, price, costprice) VALUES ($1, $2, $3, $4) RETURNING id',
-            [name, stock, price, costprice]
+            'INSERT INTO products (name, stock, price, costPrice) VALUES ($1, $2, $3, $4) RETURNING id', // Changed costprice to costPrice
+            [name, stock, price, costPrice] // Changed costprice to costPrice
         );
         res.status(201).json({ id: result.rows[0].id });
     } catch (err) {

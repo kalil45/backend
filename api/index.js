@@ -111,6 +111,9 @@ const initializeDatabase = async () => {
         paymentMethod TEXT
       )`);
     await client.query(`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS account_name TEXT`); // Add this line
+    await client.query(`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS type TEXT`);
+    await client.query(`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS description TEXT`);
+    await client.query(`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS paymentMethod TEXT`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS products (
         id SERIAL PRIMARY KEY,

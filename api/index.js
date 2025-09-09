@@ -107,7 +107,8 @@ const initializeDatabase = async () => {
         date DATE,
         account_name TEXT,
         type TEXT,
-        description TEXT
+        description TEXT,
+        paymentMethod TEXT
       )`);
     await client.query(`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS account_name TEXT`); // Add this line
     await client.query(`
@@ -220,7 +221,8 @@ app.post('/transactions', async (req, res) => {
 
     } else {
       // Handle sales transaction (original logic)
-      if (!productName || !quantity || !costPrice || !sellingPrice || !accountName) {
+      const { productName, quantity, costPrice, sellingPrice, accountName, paymentMethod } = req.body; // Added paymentMethod
+      if (!productName || !quantity || !costPrice || !sellingPrice || !accountName || !paymentMethod) { // Added paymentMethod validation
         throw new Error('Data transaksi penjualan tidak lengkap.');
       }
 
@@ -242,8 +244,8 @@ app.post('/transactions', async (req, res) => {
       const totalCost = quantity * costPrice; // Calculate total cost
       
       const insertRes = await client.query(
-        'INSERT INTO transactions (productName, quantity, costPrice, sellingPrice, profitPerUnit, total, date, account_name, type) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id',
-        [productName, quantity, costPrice, sellingPrice, profitPerUnit, total, date, accountName, 'sale']
+        'INSERT INTO transactions (productName, quantity, costPrice, sellingPrice, profitPerUnit, total, date, account_name, type, paymentMethod) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id', // Added paymentMethod
+        [productName, quantity, costPrice, sellingPrice, profitPerUnit, total, date, accountName, 'sale', paymentMethod] // Added paymentMethod
       );
 
       await client.query('UPDATE accounts SET balance = balance - $1 WHERE name = $2', [totalCost, accountName]); // Deduct totalCost from account balance

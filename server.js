@@ -346,17 +346,7 @@ app.post('/api/transactions', async (req, res) => {
     const newSourceBalance = parseFloat(sourceAccount.balance) - parseFloat(total);
     await client.query('UPDATE accounts SET balance = $1 WHERE id = $2', [newSourceBalance, sourceAccount.id]);
 
-    // Add to the destination BSI account
-    const bsiAccountName = 'Nama AKun Modal BSI'; // Use the exact name provided by the user
-    const bsiAccountRes = await client.query('SELECT * FROM accounts WHERE name = $1 FOR UPDATE', [bsiAccountName]);
-    const bsiAccount = bsiAccountRes.rows[0];
-
-    if (!bsiAccount) {
-      throw new Error(`Akun BSI (${bsiAccountName}) tidak ditemukan. Pastikan nama akun benar.`);
-    }
-
-    const newBsiBalance = parseFloat(bsiAccount.balance) + parseFloat(total);
-    await client.query('UPDATE accounts SET balance = $1 WHERE id = $2', [newBsiBalance, bsiAccount.id]);
+    
 
     // 3. Insert transaction record
     const result = await client.query(

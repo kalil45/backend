@@ -198,6 +198,7 @@ app.post('/transactions', async (req, res) => {
     await client.query('UPDATE products SET stock = $1 WHERE name = $2', [newStock, productName]);
 
     const profitPerUnit = sellingPrice - costPrice;
+    const totalProfit = profitPerUnit * quantity;
     const total = quantity * sellingPrice;
     const totalCost = quantity * costPrice; // Calculate total cost
     const date = getLocalDate();
@@ -207,8 +208,8 @@ app.post('/transactions', async (req, res) => {
       [productName, quantity, costPrice, sellingPrice, profitPerUnit, total, date, accountName]
     );
 
-    await client.query('UPDATE accounts SET balance = balance - $1 WHERE name = $2', [totalCost, accountName]); // Deduct totalCost from account balance
-    await client.query('INSERT INTO capital_history (amount, date, type) VALUES ($1, $2, $3)', [total, date, 'add']);
+    await client.query('UPDATE accounts SET balance = balance + $1 WHERE name = $2', [total, accountName]); // Add total revenue to account balance
+    await client.query('INSERT INTO capital_history (amount, date, type) VALUES ($1, $2, $3)', [totalProfit, date, 'add']);
     await client.query('COMMIT');
     res.status(201).json({ id: insertRes.rows[0].id });
   } catch (err) {
@@ -414,12 +415,21 @@ app.post('/purchases', async (req, res) => {
     await client.query('UPDATE products SET stock = stock + $1 WHERE id = $2', [quantity, productId]);
 
     const insertRes = await client.query(
-      'INSERT INTO purchases (productId, accountId, quantity, purchasePrice, total, date) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+      'INSERT INTO purchases (productId, accountId, quantity, purchasePrice, total, date) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
       [productId, accountId, quantity, purchasePrice, total, date]
     );
 
+    const newPurchaseId = insertRes.rows[0].id;
+
+    const newPurchaseRes = await client.query(`
+        SELECT p.id, pr.name as productName, p.quantity, p.purchasePrice, p.total, p.date 
+        FROM purchases p
+        JOIN products pr ON p.productId = pr.id
+        WHERE p.id = $1
+    `, [newPurchaseId]);
+
     await client.query('COMMIT');
-    res.status(201).json(insertRes.rows[0]);
+    res.status(201).json(newPurchaseRes.rows[0]);
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('Error in POST /purchases:', err);

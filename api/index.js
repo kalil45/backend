@@ -641,14 +641,45 @@ app.delete('/expenses/:id', async (req, res) => {
 app.post('/capital', async (req, res) => {
     const { amount, type } = req.body;
     const date = getLocalDate();
+    const client = await pool.connect(); // Get a client for transaction
     try {
+        await client.query('BEGIN'); // Start transaction
+
+        const modalTersisaAccountName = 'Modal Tersisa';
+        const accountRes = await client.query('SELECT * FROM accounts WHERE name = $1 FOR UPDATE', [modalTersisaAccountName]);
+        const account = accountRes.rows[0];
+
+        if (!account) {
+            throw new Error(`Akun '${modalTersisaAccountName}' tidak ditemukan. Mohon buat akun ini terlebih dahulu.`);
+        }
+
+        let newBalance;
+        if (type === 'add') {
+            newBalance = account.balance + amount;
+        } else if (type === 'subtract') {
+            if (account.balance < amount) {
+                throw new Error(`Saldo di akun '${modalTersisaAccountName}' tidak mencukupi untuk mengurangi modal.`);
+            }
+            newBalance = account.balance - amount;
+        } else {
+            throw new Error('Tipe operasi modal tidak valid. Gunakan \'add\' atau \'subtract\'.');
+        }
+
+        await client.query('UPDATE accounts SET balance = $1 WHERE id = $2', [newBalance, account.id]);
+
         const result = await pool.query(
             'INSERT INTO capital_history (amount, date, type) VALUES ($1, $2, $3) RETURNING id',
             [amount, date, type]
         );
-        res.status(201).json({ id: result.rows[0].id });
+
+        await client.query('COMMIT'); // Commit transaction
+        res.status(201).json({ id: result.rows[0].id, newBalance });
     } catch (err) {
+        await client.query('ROLLBACK'); // Rollback on error
+        console.error('Error in POST /capital:', err.message);
         res.status(400).json({ error: err.message });
+    } finally {
+        client.release(); // Release client
     }
 });
 

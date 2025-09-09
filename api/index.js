@@ -225,8 +225,12 @@ app.post('/transactions', async (req, res) => {
     } else {
       // Handle sales transaction (original logic)
       const { productName, quantity, costPrice, sellingPrice, accountName, paymentMethod } = req.body; // Added paymentMethod
-      if (!productName || !quantity || !costPrice || !sellingPrice || !accountName) { // paymentMethod is optional for cash sales
-        throw new Error('Data transaksi penjualan tidak lengkap.');
+      // Validate required fields for sales transaction
+      if (!productName || !accountName ||
+          quantity === null || quantity === undefined || isNaN(quantity) ||
+          costPrice === null || costPrice === undefined || isNaN(costPrice) ||
+          sellingPrice === null || sellingPrice === undefined || isNaN(sellingPrice)) {
+        throw new Error('Data transaksi penjualan tidak lengkap. Pastikan semua kolom terisi dengan benar.');
       }
 
       const productRes = await client.query('SELECT * FROM products WHERE name = $1', [productName]);

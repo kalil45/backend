@@ -87,51 +87,6 @@ app.delete('/accounts/:id', async (req, res) => {
   }
 });
 
-app.put('/accounts/:id', async (req, res) => {
-  const { id } = req.params;
-  const { name, balance } = req.body;
-  try {
-    const result = await pool.query(
-      'UPDATE accounts SET name = $1, balance = $2 WHERE id = $3 RETURNING *'
-      [name, balance, id]
-    );
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: 'Account not found.' });
-    }
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error('Error in PUT /accounts/:id:', err);
-    res.status(400).json({ error: err.message || 'An unknown error occurred' });
-  }
-});
-
-app.delete('/accounts/:id', async (req, res) => {
-  const { id } = req.params;
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-
-    // Check if account has any associated transactions
-    const transactionCheck = await client.query('SELECT 1 FROM transactions WHERE account_name = (SELECT name FROM accounts WHERE id = $1) LIMIT 1', [id]);
-    if (transactionCheck.rowCount > 0) {
-      throw new Error('Tidak dapat menghapus akun karena sudah ada transaksi terkait.');
-    }
-
-    const result = await pool.query('DELETE FROM accounts WHERE id = $1', [id]);
-    if (result.rowCount === 0) {
-      throw new Error('Account not found.');
-    }
-    await client.query('COMMIT');
-    res.json({ message: 'Account deleted successfully.' });
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('Error in DELETE /accounts/:id:', err);
-    res.status(400).json({ error: err.message || 'An unknown error occurred' });
-  } finally {
-    client.release();
-  }
-});
-
 // --- PERBAIKAN UNTUK DATABASE INITIALIZATION ---
 let dbInitialized = false;
 
@@ -180,6 +135,16 @@ const initializeDatabase = async () => {
         id SERIAL PRIMARY KEY,
         name TEXT NOT NULL UNIQUE,
         balance NUMERIC NOT NULL DEFAULT 0
+      )`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS purchases (
+        id SERIAL PRIMARY KEY,
+        productId INTEGER REFERENCES products(id),
+        accountId INTEGER REFERENCES accounts(id),
+        quantity INTEGER NOT NULL,
+        purchasePrice NUMERIC NOT NULL,
+        total NUMERIC NOT NULL,
+        date DATE NOT NULL
       )`);
     console.log('Database tables checked/created successfully.');
     dbInitialized = true; // Tandai bahwa inisialisasi sudah selesai
@@ -429,6 +394,52 @@ app.delete('/products/:id', async (req, res) => {
         res.json({ message: 'Produk berhasil dihapus.' });
     } catch (err) {
         res.status(500).json({ error: err.message });
+    }
+});
+
+// PURCHASES API
+app.post('/purchases', async (req, res) => {
+  const { productId, accountId, quantity, purchasePrice } = req.body;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const total = quantity * purchasePrice;
+    const date = getLocalDate();
+
+    // Deduct from account balance
+    await client.query('UPDATE accounts SET balance = balance - $1 WHERE id = $2', [total, accountId]);
+
+    // Add to product stock
+    await client.query('UPDATE products SET stock = stock + $1 WHERE id = $2', [quantity, productId]);
+
+    const insertRes = await client.query(
+      'INSERT INTO purchases (productId, accountId, quantity, purchasePrice, total, date) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+      [productId, accountId, quantity, purchasePrice, total, date]
+    );
+
+    await client.query('COMMIT');
+    res.status(201).json(insertRes.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error in POST /purchases:', err);
+    res.status(400).json({ error: err.message || 'An unknown error occurred' });
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/purchases', async (req, res) => {
+    try {
+        const { rows } = await pool.query(`
+            SELECT p.id, pr.name as productName, p.quantity, p.purchasePrice, p.total, p.date 
+            FROM purchases p
+            JOIN products pr ON p.productId = pr.id
+            ORDER BY p.date DESC, p.id DESC
+        `);
+        res.json(rows);
+    } catch (err) {
+        res.status(400).json({ error: err.message });
     }
 });
 

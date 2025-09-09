@@ -179,34 +179,47 @@ const getLocalDate = () => {
 
 // TRANSACTIONS API
 app.post('/transactions', async (req, res) => {
-  const { productName, quantity, costPrice, sellingPrice, accountName } = req.body;
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
+    const { productName, quantity, costPrice, sellingPrice, accountName } = req.body;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
 
-    const productRes = await client.query('SELECT * FROM products WHERE name = $1', [productName]);
-    const product = productRes.rows[0];
+      const productRes = await client.query('SELECT * FROM products WHERE name = $1', [productName]);
+      const product = productRes.rows[0];
 
-    if (!product) {
-      throw new Error('Produk tidak ditemukan.');
+      if (!product) {
+        throw new Error('Produk tidak ditemukan.');
+      }
+      if (product.stock < quantity) {
+        throw new Error('Stok tidak mencukupi.');
+      }
+
+      const newStock = product.stock - quantity;
+      await client.query('UPDATE products SET stock = $1 WHERE name = $2', [newStock, productName]);
+
+      const profitPerUnit = sellingPrice - costPrice;
+      const totalProfit = profitPerUnit * quantity;
+      const total = quantity * sellingPrice;
+      const totalCost = quantity * costPrice; // Calculate total cost
+      const date = getLocalDate();
+
+      const insertRes = await client.query(
+        'INSERT INTO transactions (productName, quantity, costPrice, sellingPrice, profitPerUnit, total, date, account_name) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id',
+        [productName, quantity, costPrice, sellingPrice, profitPerUnit, total, date, accountName]
+      );
+
+      await client.query('UPDATE accounts SET balance = balance + $1 WHERE name = $2', [total, accountName]); // Add total revenue to account balance
+      await client.query('INSERT INTO capital_history (amount, date, type) VALUES ($1, $2, $3)', [totalProfit, date, 'add']);
+      await client.query('COMMIT');
+      res.status(201).json({ id: insertRes.rows[0].id });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      console.error('Error in POST /transactions:', err); // Add more explicit logging
+      res.status(400).json({ error: err.message || 'An unknown error occurred' }); // Ensure message is sent
+    } finally {
+      client.release();
     }
-    if (product.stock < quantity) {
-      throw new Error('Stok tidak mencukupi.');
-    }
-
-    const newStock = product.stock - quantity;
-    await client.query('UPDATE products SET stock = $1 WHERE name = $2', [newStock, productName]);
-
-    const profitPerUnit = sellingPrice - costPrice;
-    const totalProfit = profitPerUnit * quantity;
-    const total = quantity * sellingPrice;
-    const totalCost = quantity * costPrice; // Calculate total cost
-    const date = getLocalDate();
-    
-    const insertRes = await client.query(
-      'INSERT INTO transactions (productName, quantity, costPrice, sellingPrice, profitPerUnit, total, date, account_name) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id',
-      [productName, quantity, costPrice, sellingPrice, profitPerUnit, total, date, accountName]
-    );
+  });
 
     await client.query('UPDATE accounts SET balance = balance + $1 WHERE name = $2', [total, accountName]); // Add total revenue to account balance
     await client.query('INSERT INTO capital_history (amount, date, type) VALUES ($1, $2, $3)', [totalProfit, date, 'add']);

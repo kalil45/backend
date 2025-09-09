@@ -242,8 +242,8 @@ app.post('/transactions', async (req, res) => {
       [productName, quantity, costPrice, sellingPrice, profitPerUnit, total, date, accountName]
     );
 
-    await client.query('UPDATE accounts SET balance = balance - $1 WHERE name = $2', [totalCost, accountName]); // Deduct totalCost from account balance
-    await client.query('INSERT INTO capital_history (amount, date, type) VALUES ($1, $2, $3)', [total, date, 'add']);
+    await client.query('UPDATE accounts SET balance = balance + $1 WHERE name = $2', [total, accountName]); // Add total (selling price) to account balance
+    await client.query('INSERT INTO capital_history (amount, date, type) VALUES ($1, $2, $3)', [totalCost, date, 'subtract']); // Subtract totalCost from capital history
     await client.query('COMMIT');
     res.status(201).json({ id: insertRes.rows[0].id });
   } catch (err) {

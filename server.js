@@ -343,7 +343,8 @@ app.post('/api/transactions', async (req, res) => {
       throw new Error('Akun sumber tidak ditemukan.');
     }
 
-    const newSourceBalance = parseFloat(sourceAccount.balance) - parseFloat(total);
+    const costOfGoodsSold = parseFloat(costPrice) * parseFloat(quantity);
+    const newSourceBalance = parseFloat(sourceAccount.balance) - costOfGoodsSold;
     await client.query('UPDATE accounts SET balance = $1 WHERE id = $2', [newSourceBalance, sourceAccount.id]);
 
     
@@ -408,5 +409,12 @@ function initializeDatabase() {
             payment_method VARCHAR(255),
             date DATE NOT NULL
         );
+    `);
+
+    // Insert default accounts if they don't exist
+    await pool.query(`
+        INSERT INTO accounts (name, balance)
+        VALUES ('Modal Tersisa', 0)
+        ON CONFLICT (name) DO NOTHING;
     `);
 }

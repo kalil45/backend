@@ -299,6 +299,77 @@ app.put('/api/accounts/deduct', async (req, res) => {
 });
 
 
+// TRANSACTIONS API
+app.post('/api/transactions', async (req, res) => {
+  const {
+    type,
+    productId,
+    productName,
+    quantity,
+    costPrice,
+    sellingPrice,
+    total,
+    accountName,
+    paymentMethod,
+  } = req.body;
+  const date = getLocalDate(); // Assuming getLocalDate() is defined
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Update product stock (if it's a sale)
+    if (type === 'sale' && productId) {
+      const productRes = await client.query('SELECT stock FROM products WHERE id = $1 FOR UPDATE', [productId]);
+      const product = productRes.rows[0];
+
+      if (!product) {
+        throw new Error('Produk tidak ditemukan.');
+      }
+      if (product.stock < quantity) {
+        throw new Error(`Stok tidak mencukupi. Stok tersedia: ${product.stock}`);
+      }
+
+      const newStock = product.stock - quantity;
+      await client.query('UPDATE products SET stock = $1 WHERE id = $2', [newStock, productId]);
+    }
+
+    // 2. Deduct amount from account balance
+    const accountRes = await client.query('SELECT * FROM accounts WHERE name = $1 FOR UPDATE', [accountName]);
+    const account = accountRes.rows[0];
+
+    if (!account) {
+      throw new Error('Akun tidak ditemukan.');
+    }
+
+    // For sales, deduct from account. For other types, you might add or handle differently.
+    // Assuming 'sale' means money comes IN, so ADD to account balance.
+    // If 'sale' means money goes OUT (e.g., for a purchase), then DEDUCT.
+    // Based on "Penjualan BSI", it's a sale, so money comes IN.
+    const newBalance = parseFloat(account.balance) + parseFloat(total);
+    await client.query('UPDATE accounts SET balance = $1 WHERE id = $2', [newBalance, account.id]);
+
+    // 3. Insert transaction record
+    const result = await client.query(
+      `INSERT INTO transactions (
+        type, product_id, product_name, quantity, cost_price, selling_price, total, account_name, payment_method, date
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+      [type, productId, productName, quantity, costPrice, sellingPrice, total, accountName, paymentMethod, date]
+    );
+
+    await client.query('COMMIT');
+    res.status(201).json({ id: result.rows[0].id, message: 'Transaksi berhasil dicatat dan saldo akun diperbarui.' });
+
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error processing transaction:', err.message);
+    res.status(400).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+
 // Start the server and initialize database
 app.listen(port, () => {
 console.log(`Server running on port ${port}`);
@@ -321,6 +392,22 @@ function initializeDatabase() {
             id SERIAL PRIMARY KEY,
             name VARCHAR(255) UNIQUE NOT NULL,
             balance NUMERIC(10, 2) NOT NULL DEFAULT 0
+        );
+    `);
+
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS transactions (
+            id SERIAL PRIMARY KEY,
+            type VARCHAR(50) NOT NULL,
+            product_id INT,
+            product_name VARCHAR(255),
+            quantity INT,
+            cost_price NUMERIC(10, 2),
+            selling_price NUMERIC(10, 2),
+            total NUMERIC(10, 2) NOT NULL,
+            account_name VARCHAR(255) NOT NULL,
+            payment_method VARCHAR(255),
+            date DATE NOT NULL
         );
     `);
 }

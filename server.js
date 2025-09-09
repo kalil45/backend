@@ -233,7 +233,7 @@ res.status(400).json({ error: err.message });
 
 app.get('/api/capital/total', async (req, res) => {
 try {
-const { rows } = await pool.query(`SELECT SUM(CASE W
+const { rows } = await pool.query(`SELECT SUM(balance) AS totalcapital FROM accounts WHERE name != 'Nama AKun Modal BSI'`);
 const totalCapital = rows[0].totalcapital || 0;
 res.json({ totalCapital });
 } catch (err) {

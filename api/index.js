@@ -105,7 +105,9 @@ const initializeDatabase = async () => {
         profitPerUnit NUMERIC,
         total NUMERIC,
         date DATE,
-        account_name TEXT
+        account_name TEXT,
+        type TEXT,
+        description TEXT
       )`);
     await client.query(`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS account_name TEXT`); // Add this line
     await client.query(`
@@ -179,42 +181,80 @@ const getLocalDate = () => {
 
 // TRANSACTIONS API
 app.post('/transactions', async (req, res) => {
-  const { productName, quantity, costPrice, sellingPrice, accountName } = req.body;
+  const { type, accountName, amount, description, productName, quantity, costPrice, sellingPrice } = req.body;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-
-    const productRes = await client.query('SELECT * FROM products WHERE name = $1', [productName]);
-    const product = productRes.rows[0];
-
-    if (!product) {
-      throw new Error('Produk tidak ditemukan.');
-    }
-    if (product.stock < quantity) {
-      throw new Error('Stok tidak mencukupi.');
-    }
-
-    const newStock = product.stock - quantity;
-    await client.query('UPDATE products SET stock = $1 WHERE name = $2', [newStock, productName]);
-
-    const profitPerUnit = sellingPrice - costPrice;
-    const total = quantity * sellingPrice;
-    const totalCost = quantity * costPrice; // Calculate total cost
     const date = getLocalDate();
-    
-    const insertRes = await client.query(
-      'INSERT INTO transactions (productName, quantity, costPrice, sellingPrice, profitPerUnit, total, date, account_name) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id',
-      [productName, quantity, costPrice, sellingPrice, profitPerUnit, total, date, accountName]
-    );
 
-    await client.query('UPDATE accounts SET balance = balance - $1 WHERE name = $2', [totalCost, accountName]); // Deduct totalCost from account balance
-    await client.query('INSERT INTO capital_history (amount, date, type) VALUES ($1, $2, $3)', [total, date, 'add']);
-    await client.query('COMMIT');
-    res.status(201).json({ id: insertRes.rows[0].id });
+    if (type === 'withdrawal') {
+      // Handle cash withdrawal
+      if (!accountName || !amount || amount <= 0) {
+        throw new Error('Nama akun dan jumlah penarikan harus valid.');
+      }
+
+      const accountRes = await client.query('SELECT * FROM accounts WHERE name = $1 FOR UPDATE', [accountName]);
+      const account = accountRes.rows[0];
+
+      if (!account) {
+        throw new Error('Akun tidak ditemukan.');
+      }
+      if (account.balance < amount) {
+        throw new Error('Saldo tidak mencukupi di akun yang dipilih.');
+      }
+
+      const newBalance = account.balance - amount;
+      await client.query('UPDATE accounts SET balance = $1 WHERE id = $2', [newBalance, account.id]);
+
+      // Insert into capital_history as a subtraction
+      await client.query('INSERT INTO capital_history (amount, date, type) VALUES ($1, $2, $3)', [amount, date, 'subtract']);
+
+      // Insert into transactions table for logging purposes (simplified)
+      await client.query(
+        'INSERT INTO transactions (productName, quantity, costPrice, sellingPrice, profitPerUnit, total, date, account_name, type, description) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id',
+        ['Penarikan Tunai', 0, 0, 0, 0, amount, date, accountName, 'withdrawal', description || 'Penarikan Tunai']
+      );
+
+      await client.query('COMMIT');
+      res.status(201).json({ message: 'Penarikan tunai berhasil dicatat.' });
+
+    } else {
+      // Handle sales transaction (original logic)
+      if (!productName || !quantity || !costPrice || !sellingPrice || !accountName) {
+        throw new Error('Data transaksi penjualan tidak lengkap.');
+      }
+
+      const productRes = await client.query('SELECT * FROM products WHERE name = $1', [productName]);
+      const product = productRes.rows[0];
+
+      if (!product) {
+        throw new Error('Produk tidak ditemukan.');
+      }
+      if (product.stock < quantity) {
+        throw new Error('Stok tidak mencukupi.');
+      }
+
+      const newStock = product.stock - quantity;
+      await client.query('UPDATE products SET stock = $1 WHERE name = $2', [newStock, productName]);
+
+      const profitPerUnit = sellingPrice - costPrice;
+      const total = quantity * sellingPrice;
+      const totalCost = quantity * costPrice; // Calculate total cost
+      
+      const insertRes = await client.query(
+        'INSERT INTO transactions (productName, quantity, costPrice, sellingPrice, profitPerUnit, total, date, account_name, type) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id',
+        [productName, quantity, costPrice, sellingPrice, profitPerUnit, total, date, accountName, 'sale']
+      );
+
+      await client.query('UPDATE accounts SET balance = balance - $1 WHERE name = $2', [totalCost, accountName]); // Deduct totalCost from account balance
+      await client.query('INSERT INTO capital_history (amount, date, type) VALUES ($1, $2, $3)', [total, date, 'add']);
+      await client.query('COMMIT');
+      res.status(201).json({ id: insertRes.rows[0].id });
+    }
   } catch (err) {
     await client.query('ROLLBACK');
-    console.error('Error in POST /transactions:', err); // Add more explicit logging
-    res.status(400).json({ error: err.message || 'An unknown error occurred' }); // Ensure message is sent
+    console.error('Error in POST /transactions:', err);
+    res.status(400).json({ error: err.message || 'An unknown error occurred' });
   } finally {
     client.release();
   }

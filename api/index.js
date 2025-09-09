@@ -225,7 +225,7 @@ app.post('/transactions', async (req, res) => {
     } else {
       // Handle sales transaction (original logic)
       const { productName, quantity, costPrice, sellingPrice, accountName, paymentMethod } = req.body; // Added paymentMethod
-      if (!productName || !quantity || !costPrice || !sellingPrice || !accountName || !paymentMethod) { // Added paymentMethod validation
+      if (!productName || !quantity || !costPrice || !sellingPrice || !accountName) { // paymentMethod is optional for cash sales
         throw new Error('Data transaksi penjualan tidak lengkap.');
       }
 

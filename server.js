@@ -244,13 +244,13 @@ res.status(400).json({ error: err.message });
 
 // ACCOUNTS API
 app.post('/api/accounts', async (req, res) => {
-  const { name, balance } = req.body;
+  const { name, balance, type } = req.body; // Add type
   try {
     const result = await pool.query(
-      'INSERT INTO accounts (name, balance) VALUES ($1, $2) RETURNING id',
-      [name, balance]
+      'INSERT INTO accounts (name, balance, type) VALUES ($1, $2, $3) RETURNING id, name, balance, type',
+      [name, balance, type] // Add type to query parameters
     );
-    res.status(201).json({ id: result.rows[0].id, name, balance });
+    res.status(201).json(result.rows[0]); // Return the full new account object
   } catch (err) {
     console.error(err.message);
     res.status(400).json({ error: err.message });
@@ -390,7 +390,8 @@ function initializeDatabase() {
         CREATE TABLE IF NOT EXISTS accounts (
             id SERIAL PRIMARY KEY,
             name VARCHAR(255) UNIQUE NOT NULL,
-            balance NUMERIC(10, 2) NOT NULL DEFAULT 0
+            balance NUMERIC(10, 2) NOT NULL DEFAULT 0,
+            type VARCHAR(50) NOT NULL DEFAULT 'General'
         );
     `);
 

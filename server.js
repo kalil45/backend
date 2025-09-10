@@ -244,13 +244,13 @@ res.status(400).json({ error: err.message });
 
 // ACCOUNTS API
 app.post('/api/accounts', async (req, res) => {
-  const { name, balance, type } = req.body; // Add type
+  const { name, balance } = req.body;
   try {
     const result = await pool.query(
-      'INSERT INTO accounts (name, balance, type) VALUES ($1, $2, $3) RETURNING id, name, balance, type',
-      [name, balance, type] // Add type to query parameters
+      'INSERT INTO accounts (name, balance) VALUES ($1, $2) RETURNING id',
+      [name, balance]
     );
-    res.status(201).json(result.rows[0]); // Return the full new account object
+    res.status(201).json({ id: result.rows[0].id, name, balance });
   } catch (err) {
     console.error(err.message);
     res.status(400).json({ error: err.message });
@@ -334,17 +334,17 @@ app.post('/api/transactions', async (req, res) => {
       await client.query('UPDATE products SET stock = $1 WHERE id = $2', [newStock, productId]);
     }
 
-    // 2. Handle account balance updates
-    // Add to the destination account (accountName from form)
-    const destAccountRes = await client.query('SELECT * FROM accounts WHERE name = $1 FOR UPDATE', [accountName]);
-    const destAccount = destAccountRes.rows[0];
+    // 2. Handle account balance updates for transfer
+    // Deduct from the source account (accountName from form)
+    const sourceAccountRes = await client.query('SELECT * FROM accounts WHERE name = $1 FOR UPDATE', [accountName]);
+    const sourceAccount = sourceAccountRes.rows[0];
 
-    if (!destAccount) {
-      throw new Error('Akun tujuan tidak ditemukan.');
+    if (!sourceAccount) {
+      throw new Error('Akun sumber tidak ditemukan.');
     }
 
-    const newDestBalance = parseFloat(destAccount.balance) + parseFloat(total);
-    await client.query('UPDATE accounts SET balance = $1 WHERE id = $2', [newDestBalance, destAccount.id]);
+    const newSourceBalance = parseFloat(sourceAccount.balance) - parseFloat(total);
+    await client.query('UPDATE accounts SET balance = $1 WHERE id = $2', [newSourceBalance, sourceAccount.id]);
 
     
 
@@ -390,8 +390,7 @@ function initializeDatabase() {
         CREATE TABLE IF NOT EXISTS accounts (
             id SERIAL PRIMARY KEY,
             name VARCHAR(255) UNIQUE NOT NULL,
-            balance NUMERIC(10, 2) NOT NULL DEFAULT 0,
-            type VARCHAR(50) NOT NULL DEFAULT 'General'
+            balance NUMERIC(10, 2) NOT NULL DEFAULT 0
         );
     `);
 

@@ -334,17 +334,17 @@ app.post('/api/transactions', async (req, res) => {
       await client.query('UPDATE products SET stock = $1 WHERE id = $2', [newStock, productId]);
     }
 
-    // 2. Handle account balance updates for transfer
-    // Deduct from the source account (accountName from form)
-    const sourceAccountRes = await client.query('SELECT * FROM accounts WHERE name = $1 FOR UPDATE', [accountName]);
-    const sourceAccount = sourceAccountRes.rows[0];
+    // 2. Handle account balance updates
+    // Add to the destination account (accountName from form)
+    const destAccountRes = await client.query('SELECT * FROM accounts WHERE name = $1 FOR UPDATE', [accountName]);
+    const destAccount = destAccountRes.rows[0];
 
-    if (!sourceAccount) {
-      throw new Error('Akun sumber tidak ditemukan.');
+    if (!destAccount) {
+      throw new Error('Akun tujuan tidak ditemukan.');
     }
 
-    const newSourceBalance = parseFloat(sourceAccount.balance) - parseFloat(total);
-    await client.query('UPDATE accounts SET balance = $1 WHERE id = $2', [newSourceBalance, sourceAccount.id]);
+    const newDestBalance = parseFloat(destAccount.balance) + parseFloat(total);
+    await client.query('UPDATE accounts SET balance = $1 WHERE id = $2', [newDestBalance, destAccount.id]);
 
     
 

@@ -1,8 +1,11 @@
 const express = require('express');
 const { Pool } = require('pg');
 const cors = require('cors');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 
 const app = express();
+const JWT_SECRET = process.env.JWT_SECRET || 'supersecretjwtkey';
 
 app.use(cors({
   origin: 'https://appkasir-git-main-khalil-finandas-projects.vercel.app',
@@ -18,7 +21,7 @@ const pool = new Pool({
 
 
 // ACCOUNTS API
-app.get('/api/accounts', async (req, res) => {
+app.get('/api/accounts', authenticateToken, authorizeRole(['admin']), async (req, res) => {
   try {
     const { rows } = await pool.query("SELECT * FROM accounts");
     res.json(rows);
@@ -28,7 +31,7 @@ app.get('/api/accounts', async (req, res) => {
   }
 });
 
-app.post('/api/accounts', async (req, res) => {
+app.post('/api/accounts', authenticateToken, authorizeRole(['admin']), async (req, res) => {
   try {
     const { name, balance } = req.body;
     const newAccount = await pool.query(
@@ -42,7 +45,7 @@ app.post('/api/accounts', async (req, res) => {
   }
 });
 
-app.put('/api/accounts/:id', async (req, res) => {
+app.put('/api/accounts/:id', authenticateToken, authorizeRole(['admin']), async (req, res) => {
   const { id } = req.params;
   const { name, balance } = req.body;
   try {
@@ -60,7 +63,7 @@ app.put('/api/accounts/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/accounts/:id', async (req, res) => {
+app.delete('/api/accounts/:id', authenticateToken, authorizeRole(['admin']), async (req, res) => {
   const { id } = req.params;
   const client = await pool.connect();
   try {
@@ -152,6 +155,13 @@ const initializeDatabase = async () => {
         total NUMERIC NOT NULL,
         date DATE NOT NULL
       )`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        username TEXT NOT NULL UNIQUE,
+        password TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'kasir'
+      )`);
     console.log('Database tables checked/created successfully.');
     dbInitialized = true; // Tandai bahwa inisialisasi sudah selesai
   } catch (err) {
@@ -173,6 +183,79 @@ app.use(async (req, res, next) => {
 });
 // --- AKHIR PERBAIKAN ---
 
+// AUTHENTICATION API
+app.post('/api/register', async (req, res) => {
+  const { username, password, role } = req.body;
+  try {
+    const hashedPassword = await bcrypt.hash(password, 10); // Hash password with salt rounds = 10
+    const newUser = await pool.query(
+      "INSERT INTO users (username, password, role) VALUES ($1, $2, $3) RETURNING id, username, role",
+      [username, hashedPassword, role || 'kasir'] // Default role to 'kasir'
+    );
+    res.status(201).json({ message: "User registered successfully", user: newUser.rows[0] });
+  } catch (err) {
+    console.error('Error in POST /api/register:', err.message);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/login', async (req, res) => {
+  const { username, password } = req.body;
+  try {
+    const userRes = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
+    const user = userRes.rows[0];
+
+    if (!user) {
+      return res.status(400).json({ error: 'Invalid Credentials' });
+    }
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ error: 'Invalid Credentials' });
+    }
+
+    const token = jwt.sign(
+      { id: user.id, username: user.username, role: user.role },
+      JWT_SECRET,
+      { expiresIn: '1h' } // Token expires in 1 hour
+    );
+
+    res.json({ token, user: { id: user.id, username: user.username, role: user.role } });
+
+  } catch (err) {
+    console.error('Error in POST /api/login:', err.message);
+    res.status(500).json({ error: 'Server Error' });
+  }
+});
+
+// Middleware for authenticating JWT
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+
+  if (token == null) return res.status(401).json({ error: 'Authentication token required' });
+
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) return res.status(403).json({ error: 'Invalid or expired token' });
+    req.user = user;
+    next();
+  });
+};
+
+// Middleware for role-based access control
+const authorizeRole = (roles) => {
+  return (req, res, next) => {
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({ error: 'Forbidden: Insufficient role permissions' });
+    }
+    next();
+  };
+};
+
+
+
+
+
 
 // Helper function to get local date in YYYY-MM-DD format
 const getLocalDate = () => {
@@ -184,7 +267,7 @@ const getLocalDate = () => {
 };
 
 // TRANSACTIONS API
-app.post('/api/transactions', async (req, res) => {
+app.post('/api/transactions', authenticateToken, authorizeRole(['admin', 'kasir']), async (req, res) => {
   const { type, accountName, amount, description, productName, quantity, costPrice, sellingPrice } = req.body;
   const client = await pool.connect();
   try {
@@ -306,7 +389,7 @@ app.post('/api/transactions', async (req, res) => {
   }
 });
 
-app.get('/api/transactions', async (req, res) => {
+app.get('/api/transactions', authenticateToken, authorizeRole(['admin']), async (req, res) => {
     const { startDate, endDate } = req.query;
     let sql = `SELECT * FROM transactions`;
     const params = [];
@@ -324,7 +407,7 @@ app.get('/api/transactions', async (req, res) => {
     }
 });
 
-app.delete('/api/transactions/:id', async (req, res) => {
+app.delete('/api/transactions/:id', authenticateToken, authorizeRole(['admin']), async (req, res) => {
     const { id } = req.params;
     const client = await pool.connect();
     try {
@@ -354,7 +437,7 @@ app.delete('/api/transactions/:id', async (req, res) => {
     }
 });
 
-app.put('/api/transactions/:id', async (req, res) => {
+app.put('/api/transactions/:id', authenticateToken, authorizeRole(['admin']), async (req, res) => {
     const { id } = req.params;
     const { quantity, costprice, sellingPrice } = req.body;
     const client = await pool.connect();
@@ -413,7 +496,7 @@ app.put('/api/transactions/:id', async (req, res) => {
 
 
 // PRODUCTS API
-app.post('/api/products', async (req, res) => {
+app.post('/api/products', authenticateToken, authorizeRole(['admin']), async (req, res) => {
     const { name, stock, price, costPrice } = req.body; // Changed costprice to costPrice
     try {
         const result = await pool.query(
@@ -426,7 +509,7 @@ app.post('/api/products', async (req, res) => {
     }
 });
 
-app.get('/api/products', async (req, res) => {
+app.get('/api/products', authenticateToken, authorizeRole(['admin', 'kasir']), async (req, res) => {
     const { search } = req.query;
     let sql = `SELECT * FROM products`;
     let params = [];
@@ -443,7 +526,7 @@ app.get('/api/products', async (req, res) => {
     }
 });
 
-app.put('/api/products/:id', async (req, res) => {
+app.put('/api/products/:id', authenticateToken, authorizeRole(['admin']), async (req, res) => {
     const { id } = req.params;
     const { stock } = req.body;
     try {
@@ -458,7 +541,7 @@ app.put('/api/products/:id', async (req, res) => {
     }
 });
 
-app.delete('/api/products/:id', async (req, res) => {
+app.delete('/api/products/:id', authenticateToken, authorizeRole(['admin']), async (req, res) => {
     const { id } = req.params;
     try {
         const productRes = await pool.query('SELECT name FROM products WHERE id = $1', [id]);
@@ -484,7 +567,7 @@ app.delete('/api/products/:id', async (req, res) => {
 });
 
 // PURCHASES API
-app.post('/api/purchases', async (req, res) => {
+app.post('/api/purchases', authenticateToken, authorizeRole(['admin']), async (req, res) => {
   const { productId, accountId, quantity, purchasePrice } = req.body;
   const client = await pool.connect();
   try {
@@ -524,7 +607,7 @@ app.post('/api/purchases', async (req, res) => {
   }
 });
 
-app.get('/api/purchases', async (req, res) => {
+app.get('/api/purchases', authenticateToken, authorizeRole(['admin']), async (req, res) => {
     try {
         const { rows } = await pool.query(`
             SELECT p.id, pr.name as productName, p.quantity, p.purchasePrice, p.total, p.date 
@@ -540,7 +623,7 @@ app.get('/api/purchases', async (req, res) => {
 
 
 // EXPENSES API
-app.post('/api/expenses', async (req, res) => {
+app.post('/api/expenses', authenticateToken, authorizeRole(['admin']), async (req, res) => {
     const { description, amount } = req.body;
     const date = getLocalDate();
     const client = await pool.connect();
@@ -564,7 +647,7 @@ app.post('/api/expenses', async (req, res) => {
     }
 });
 
-app.get('/api/expenses', async (req, res) => {
+app.get('/api/expenses', authenticateToken, authorizeRole(['admin']), async (req, res) => {
     const { startDate, endDate } = req.query;
     let sql = `SELECT * FROM expenses`;
     const params = [];
@@ -581,7 +664,7 @@ app.get('/api/expenses', async (req, res) => {
     }
 });
 
-app.put('/api/expenses/:id', async (req, res) => {
+app.put('/api/expenses/:id', authenticateToken, authorizeRole(['admin']), async (req, res) => {
     const { id } = req.params;
     const { description, amount } = req.body;
     const client = await pool.connect();
@@ -611,7 +694,7 @@ app.put('/api/expenses/:id', async (req, res) => {
     }
 });
 
-app.delete('/api/expenses/:id', async (req, res) => {
+app.delete('/api/expenses/:id', authenticateToken, authorizeRole(['admin']), async (req, res) => {
     const { id } = req.params;
     const client = await pool.connect();
     try {
@@ -642,7 +725,7 @@ app.delete('/api/expenses/:id', async (req, res) => {
 
 
 // CAPITAL API
-app.post('/api/capital', async (req, res) => {
+app.post('/api/capital', authenticateToken, authorizeRole(['admin']), async (req, res) => {
     const { amount, type } = req.body;
     const date = getLocalDate();
     const client = await pool.connect(); // Get a client for transaction
@@ -687,7 +770,7 @@ app.post('/api/capital', async (req, res) => {
     }
 });
 
-app.get('/api/capital/total', async (req, res) => {
+app.get('/api/capital/total', authenticateToken, authorizeRole(['admin']), async (req, res) => {
     try {
         const { rows } = await pool.query(`SELECT SUM(CASE WHEN type = 'add' THEN amount ELSE -amount END) AS totalCapital FROM capital_history`);
         const totalCapital = rows[0].totalcapital || 0;

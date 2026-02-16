@@ -5,7 +5,7 @@ const cors = require('cors');
 const app = express();
 
 app.use(cors({
-  origin: 'https://template-web-app-sigma.vercel.app',
+  origin: 'https://appkasir-git-main-khalil-finandas-projects.vercel.app',
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
@@ -18,7 +18,7 @@ const pool = new Pool({
 
 
 // ACCOUNTS API
-app.get('/accounts', async (req, res) => {
+app.get('/api/accounts', async (req, res) => {
   try {
     const { rows } = await pool.query("SELECT * FROM accounts");
     res.json(rows);
@@ -28,7 +28,7 @@ app.get('/accounts', async (req, res) => {
   }
 });
 
-app.post('/accounts', async (req, res) => {
+app.post('/api/accounts', async (req, res) => {
   try {
     const { name, balance } = req.body;
     const newAccount = await pool.query(
@@ -42,7 +42,7 @@ app.post('/accounts', async (req, res) => {
   }
 });
 
-app.put('/accounts/:id', async (req, res) => {
+app.put('/api/accounts/:id', async (req, res) => {
   const { id } = req.params;
   const { name, balance } = req.body;
   try {
@@ -60,7 +60,7 @@ app.put('/accounts/:id', async (req, res) => {
   }
 });
 
-app.delete('/accounts/:id', async (req, res) => {
+app.delete('/api/accounts/:id', async (req, res) => {
   const { id } = req.params;
   const client = await pool.connect();
   try {
@@ -184,7 +184,7 @@ const getLocalDate = () => {
 };
 
 // TRANSACTIONS API
-app.post('/transactions', async (req, res) => {
+app.post('/api/transactions', async (req, res) => {
   const { type, accountName, amount, description, productName, quantity, costPrice, sellingPrice } = req.body;
   const client = await pool.connect();
   try {
@@ -306,7 +306,7 @@ app.post('/transactions', async (req, res) => {
   }
 });
 
-app.get('/transactions', async (req, res) => {
+app.get('/api/transactions', async (req, res) => {
     const { startDate, endDate } = req.query;
     let sql = `SELECT * FROM transactions`;
     const params = [];
@@ -324,7 +324,7 @@ app.get('/transactions', async (req, res) => {
     }
 });
 
-app.delete('/transactions/:id', async (req, res) => {
+app.delete('/api/transactions/:id', async (req, res) => {
     const { id } = req.params;
     const client = await pool.connect();
     try {
@@ -354,7 +354,7 @@ app.delete('/transactions/:id', async (req, res) => {
     }
 });
 
-app.put('/transactions/:id', async (req, res) => {
+app.put('/api/transactions/:id', async (req, res) => {
     const { id } = req.params;
     const { quantity, costprice, sellingPrice } = req.body;
     const client = await pool.connect();
@@ -413,7 +413,7 @@ app.put('/transactions/:id', async (req, res) => {
 
 
 // PRODUCTS API
-app.post('/products', async (req, res) => {
+app.post('/api/products', async (req, res) => {
     const { name, stock, price, costPrice } = req.body; // Changed costprice to costPrice
     try {
         const result = await pool.query(
@@ -426,7 +426,7 @@ app.post('/products', async (req, res) => {
     }
 });
 
-app.get('/products', async (req, res) => {
+app.get('/api/products', async (req, res) => {
     const { search } = req.query;
     let sql = `SELECT * FROM products`;
     let params = [];
@@ -443,7 +443,7 @@ app.get('/products', async (req, res) => {
     }
 });
 
-app.put('/products/:id', async (req, res) => {
+app.put('/api/products/:id', async (req, res) => {
     const { id } = req.params;
     const { stock } = req.body;
     try {
@@ -458,7 +458,7 @@ app.put('/products/:id', async (req, res) => {
     }
 });
 
-app.delete('/products/:id', async (req, res) => {
+app.delete('/api/products/:id', async (req, res) => {
     const { id } = req.params;
     try {
         const productRes = await pool.query('SELECT name FROM products WHERE id = $1', [id]);
@@ -484,7 +484,7 @@ app.delete('/products/:id', async (req, res) => {
 });
 
 // PURCHASES API
-app.post('/purchases', async (req, res) => {
+app.post('/api/purchases', async (req, res) => {
   const { productId, accountId, quantity, purchasePrice } = req.body;
   const client = await pool.connect();
   try {
@@ -524,7 +524,7 @@ app.post('/purchases', async (req, res) => {
   }
 });
 
-app.get('/purchases', async (req, res) => {
+app.get('/api/purchases', async (req, res) => {
     try {
         const { rows } = await pool.query(`
             SELECT p.id, pr.name as productName, p.quantity, p.purchasePrice, p.total, p.date 
@@ -540,7 +540,7 @@ app.get('/purchases', async (req, res) => {
 
 
 // EXPENSES API
-app.post('/expenses', async (req, res) => {
+app.post('/api/expenses', async (req, res) => {
     const { description, amount } = req.body;
     const date = getLocalDate();
     const client = await pool.connect();
@@ -564,7 +564,7 @@ app.post('/expenses', async (req, res) => {
     }
 });
 
-app.get('/expenses', async (req, res) => {
+app.get('/api/expenses', async (req, res) => {
     const { startDate, endDate } = req.query;
     let sql = `SELECT * FROM expenses`;
     const params = [];
@@ -581,7 +581,7 @@ app.get('/expenses', async (req, res) => {
     }
 });
 
-app.put('/expenses/:id', async (req, res) => {
+app.put('/api/expenses/:id', async (req, res) => {
     const { id } = req.params;
     const { description, amount } = req.body;
     const client = await pool.connect();
@@ -611,7 +611,7 @@ app.put('/expenses/:id', async (req, res) => {
     }
 });
 
-app.delete('/expenses/:id', async (req, res) => {
+app.delete('/api/expenses/:id', async (req, res) => {
     const { id } = req.params;
     const client = await pool.connect();
     try {
@@ -642,7 +642,7 @@ app.delete('/expenses/:id', async (req, res) => {
 
 
 // CAPITAL API
-app.post('/capital', async (req, res) => {
+app.post('/api/capital', async (req, res) => {
     const { amount, type } = req.body;
     const date = getLocalDate();
     const client = await pool.connect(); // Get a client for transaction
@@ -687,7 +687,7 @@ app.post('/capital', async (req, res) => {
     }
 });
 
-app.get('/capital/total', async (req, res) => {
+app.get('/api/capital/total', async (req, res) => {
     try {
         const { rows } = await pool.query(`SELECT SUM(CASE WHEN type = 'add' THEN amount ELSE -amount END) AS totalCapital FROM capital_history`);
         const totalCapital = rows[0].totalcapital || 0;
